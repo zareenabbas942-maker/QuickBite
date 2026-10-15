@@ -11,7 +11,7 @@ import AdminDashboard from "./pages/AdminDashboard";
 import Assistant from "./pages/Assistant";
 
 // Local testing ke liye FastAPI backend
-const API_BASE_URL = "http://127.0.0.1:8000";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
 
 const initialMenu = [
   { id: "B01", name: "Zinger Burger", category: "Burgers", price: 450, emoji: "🍔", description: "Crispy chicken, lettuce and mayo" },
