@@ -42,7 +42,7 @@ MENU = [
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL = "llama-3.1-8b-instant"
+GROQ_MODEL = "openai/gpt-oss-20b"
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "restaurant_orders.db"
