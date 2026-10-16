@@ -40,8 +40,9 @@ MENU = [
     {"id": "D01", "name": "Cola", "price": 150},
 ]
 
-OLLAMA_URL = "http://127.0.0.1:11434/api/generate"
-OLLAMA_MODEL = "qwen2.5:3b"
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+GROQ_MODEL = "llama-3.1-8b-instant"
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "restaurant_orders.db"
@@ -157,85 +158,102 @@ def get_menu():
     return {"menu": MENU}
 
 
+
 @app.post("/api/chat")
 def chat(request: ChatRequest):
+    if not GROQ_API_KEY:
+        raise HTTPException(
+            status_code=503,
+            detail="Groq API key is not configured."
+        )
+
     menu_text = "\n".join(
         f"- {item['name']}: PKR {item['price']}"
         for item in MENU
     )
 
-    prompt = f"""
-You are the friendly QuickBite AI Restaurant Assistant.
+    system_prompt = f"""
+You are QuickBite's friendly AI Restaurant Assistant.
 Reply in the customer's language when possible.
 
 OFFICIAL MENU:
 {menu_text}
 
 STRICT RULES:
-1. Recommend only items listed in the official menu.
-2. Use the exact official item names and individual prices.
-3. Never invent menu items, prices, discounts, order IDs, tokens, or statuses.
-4. Never calculate, estimate, or state a combined order total.
-5. You may repeat individual item prices from the official menu.
-6. If asked for a total, direct the customer to the cart or checkout.
-7. Guide customers who want to order to add items to their cart and use checkout.
-8. Do not claim items were added to the cart unless the application confirms it.
-9. Do not claim an order was placed or saved unless the backend confirms it.
-10. Do not pretend to access the database or track orders.
-    Direct customers to the Track Order page.
-11. If information is unavailable, politely say so instead of guessing.
-12. The backend checkout is the source of truth for prices,
-    quantities, totals, and order confirmation.
-
-Customer message: {request.message}
-Assistant:
+1. Recommend only items from the official menu.
+2. Use exact menu names and individual prices.
+3. Never invent items, prices, discounts, order IDs or statuses.
+4. Never calculate or state a combined order total.
+5. If asked for a total, direct the customer to Cart or Checkout.
+6. Guide customers to add items to cart and checkout.
+7. Never claim items were added to cart unless confirmed.
+8. Never claim an order was placed unless confirmed.
+9. For order tracking, direct customers to Track Order.
+10. The backend is the source of truth for prices and orders.
 """
+
+    total_keywords = (
+        "total", "altogether", "combined", "grand total",
+        "bill", "cost for all", "price for all"
+    )
+
+    if any(
+        keyword in request.message.lower()
+        for keyword in total_keywords
+    ):
+        return {
+            "reply": (
+                "Please check your Cart or Checkout for the "
+                "exact total. QuickBite calculates your bill "
+                "using official menu prices."
+            )
+        }
 
     try:
         response = requests.post(
-            OLLAMA_URL,
-            json={
-                "model": OLLAMA_MODEL,
-                "prompt": prompt,
-                "stream": False
+            GROQ_URL,
+            headers={
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Content-Type": "application/json"
             },
-            timeout=120
+            json={
+                "model": GROQ_MODEL,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": system_prompt
+                    },
+                    {
+                        "role": "user",
+                        "content": request.message
+                    }
+                ],
+                "temperature": 0.2,
+                "max_tokens": 300
+            },
+            timeout=30
         )
-   
+
         response.raise_for_status()
-        answer = response.json().get("response", "").strip()
+        data = response.json()
+
+        answer = (
+            data["choices"][0]["message"]["content"] or ""
+        ).strip()
 
         if not answer:
-            return {"reply": "Sorry, please try asking again."}
-
-        # Prevent the AI from presenting an unreliable combined total.
-        total_keywords = (
-            "total", "altogether", "combined", "grand total",
-            "bill", "cost for all", "price for all"
-        )
-        asks_for_total = any(
-            keyword in request.message.lower()
-            for keyword in total_keywords
-        )
-
-        if asks_for_total:
             return {
-                "reply": (
-                    "Please check your Cart or Checkout for the exact "
-                    "total. QuickBite calculates your bill using the "
-                    "official menu prices."
-                )
+                "reply": "Sorry, please try asking again."
             }
 
         return {"reply": answer}
 
-    except requests.RequestException:
-        return {
-            "reply": (
-                "AI service is unavailable. Please check that Ollama "
-                "is running and qwen2.5:3b is installed."
-            )
-        }
+    except (requests.RequestException, KeyError, IndexError,
+            TypeError, ValueError):
+        raise HTTPException(
+            status_code=503,
+            detail="AI service is temporarily unavailable."
+        )
 
 
 @app.post("/api/orders")
