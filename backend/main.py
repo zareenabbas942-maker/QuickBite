@@ -248,8 +248,40 @@ STRICT RULES:
 
         return {"reply": answer}
 
+    
+    except requests.HTTPError as error:
+        status = (
+            error.response.status_code
+            if error.response is not None
+            else "unknown"
+        )
+        print(f"Groq API HTTP error: {status}", flush=True)
+
+        if error.response is not None:
+            try:
+                groq_error = error.response.json().get("error", {})
+                print(
+                    f"Groq error type: {groq_error.get('type', 'unknown')}",
+                    flush=True
+                )
+                print(
+                    f"Groq error code: {groq_error.get('code', 'unknown')}",
+                    flush=True
+                )
+            except (ValueError, AttributeError):
+                pass
+
+        raise HTTPException(
+            status_code=503,
+            detail="AI service is temporarily unavailable."
+        )
+
     except (requests.RequestException, KeyError, IndexError,
-            TypeError, ValueError):
+            TypeError, ValueError) as error:
+        print(
+            f"Groq connection or response error: {type(error).__name__}",
+            flush=True
+        )
         raise HTTPException(
             status_code=503,
             detail="AI service is temporarily unavailable."
